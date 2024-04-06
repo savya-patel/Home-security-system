@@ -1,0 +1,165 @@
+		area Final, code, readonly
+		export __main
+__main 	proc
+	
+		LDR R0,=0x40004C21 ;port 4 inputs
+		LDR R1,=0x40004C40 ;port 5 outputs
+		
+		;inputs
+		MOV R2, #0x00 ; all pin as input in DDIR
+		STRB R2, [R0, #0x04]; 
+		MOV R2, #0xFF ;all input pins as ren enabled
+		STRB R2, [R0, #0x06]; 
+		MOV R2, #0xFF ;all input pins as pullup
+		STRB R2, [R0, #0x02]; 
+		
+		;outputs
+		MOV R3, #0xFF ; all pin as output in DDIR
+		STRB R3, [R1, #0x04]; port 5 is all outputs
+		MOV R4, #0x00 ;set R4 to 0 
+		STRB R4, [R1, #0x02];write 4.0 to all pins of Port 5 to turn off the LEDs
+		
+repeat  ;enable switch
+		LDRB R7, [R0, #0x00] ;load input regsiter, this is enable switch
+		AND R4,R7,#0x01 ; check if pin 0 or enable switch is enabled 
+		CMP R4, #0x00   ; if so checks for motion input, if not stays in loop
+		BEQ motion
+		B repeat
+		
+motion  ;IR sensor check
+		LDRB R7, [R0, #0x00] ;load input regsiter
+		AND R4,R7,#0x02 ; check if pin 4.1 is enabled or motion has been detected. 
+		CMP R4, #0x00
+		MOV R5, #0x03; 3 attempts for user
+		MOV R3, #0x00; 
+		BEQ keypress ; if motion detected checks for key entry, if not stays in loop
+		B repeat
+		
+		
+keypress
+		MOV R9, #4 ;only refresh mask after 4 keys are pressed
+		MOV R6, #0x00; R6 will hold the sequence
+		B keyseq
+		
+keyseq		
+		MOV R10,#0x00
+		MOV R10,#0x02
+		STRB R10,[R1, #0x02]
+		BL delay3
+		MOV R10,#0x00
+		STRB R10,[R1, #0x02]
+		;enable green LED showing keypad ready for input, pin 5.1
+;key1 	
+		LDRB R2, [R0, #0x00] ;load input regsiter
+		AND R4,R2,#0x08 ; check if pin 4.3 or second button is enabled 
+		CMP R4, #0x00
+		BEQ right1 ; if so goes to right, if not checks key2
+		BNE key2
+		
+right1	
+		BL delay1; delay to help with debounce, and gives user a sense of pace 
+		ADD R6,R6,#1 ;loads 1 in the mask
+		SUBS R9,R9,#1
+		BNE keyseq ;checks if all four keys have been pressed to check a sequence if so code moves to check
+		BEQ check  ;if not code checks for new user entry
+		
+key2    
+		LDRB R2, [R0, #0x00] ; Load input register
+        AND R4, R2, #0x20    ; Check if pin 4.5 or fourth button is enabled
+        CMP R4, #0x00
+		BEQ right2 ; if so goes to right, if not checks key3
+		BNE key3
+
+right2
+		BL delay1
+		LSL R6,R6,#4 ;shifts mask by 4 bits
+		ADD R6,R6,#2 ;loads 2 in the mask
+		SUBS R9,R9,#1
+		BNE keyseq ;checks if all four keys have been pressed to check a sequence if so code moves to check
+		BEQ check  ;if not code checks for new user entry
+		
+key3		
+		LDRB R2, [R0, #0x00] ; Load input register
+        AND R4, R2, #0x04    ; Check if pin 4.2 or button one is enabled 
+        CMP R4, #0x00
+		BEQ right3  ; if so goes to right, if not checks key4
+		BNE key4
+
+right3
+		BL delay1  
+		LSL R6,R6,#4 ;shifts mask by 4 bits
+		ADD R6,R6,#3 ;loads 3 in the mask
+		SUBS R9,R9,#1
+		BNE keyseq ;checks if all four keys have been pressed to check a sequence if so code moves to check
+		BEQ check  ;if not code checks for new user entry
+		
+key4    
+		LDRB R2, [R0, #0x00] ; Load input register
+        AND R4, R2, #0x10    ; Check if pin 4.4 or third button is enabled 
+        CMP R4, #0x00
+		BEQ right4   ; if so goes to right, if not loops to start of key sequence
+		B keyseq
+
+right4
+		BL delay1
+		LSL R6,R6,#4 ;shifts mask by 4 bits
+		ADD R6,R6,#4 ;loads 4 in the mask
+		SUBS R9,R9,#1
+		BNE keyseq ;checks if all four keys have been pressed to check a sequence if so code moves to check
+		BEQ check  ;if not code checks for new user entry
+		
+check
+		SUBS R5,R5,#1 ;reduce one attempt
+		CMP R5,R3 ; if enough attempts left continue or else end with red lED staying on
+		BNE continue
+		BEQ wrongfinal
+
+continue
+		MOV R8,#0x1234
+		CMP R6,R8 ;checks entry mask with the right sequence it should be entered in
+		BNE wrong
+		BEQ right
+		
+wrong	;wrong sequence	
+		MOV R10,#0x04 ;blinks red light
+		STRB R10,[R1, #0x02]
+		BL delay1
+		B keypress ;loops to start of key presse with a fresh mask
+		
+wrongfinal
+		;final wrong sequence	
+		MOV R10,#0x04 ;red light stays on, pin 5.2
+		STRB R10,[R1, #0x02]
+		BL delay1
+		B wrongfinal
+		
+right	;right sequence
+		MOV R10,#0x00
+		MOV R10,#0x02 ;blinks green light
+		STRB R10,[R1, #0x02]
+		BL delay3
+rightwhite
+		MOV R10,#0x00
+		MOV R10,#0x01 ;white light stays on, pin 5.0
+		STRB R10,[R1, #0x02]
+		B rightwhite; 
+				
+delay1 		function ;delay for key presses
+			mov r12, #0x50000
+delayloop1	sub r12,r12, #0x01
+			cmp r12, #0x00
+			bne delayloop1
+			bx lr
+			endp
+				
+delay3 		function ;delay for LEDS
+			mov r12, #0x100000
+delayloop3	sub r12,r12, #0x01
+			cmp r12, #0x00
+			bne delayloop3
+			bx lr
+			endp
+			
+			endp
+			end
+		
